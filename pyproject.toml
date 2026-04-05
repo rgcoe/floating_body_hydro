@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pdstripy"
+version = "0.1.0"
+description = "Parse PDStrip hydrodynamics output files into xarray datasets"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "capytaine[optional]",
+    "ipykernel",
+    "matplotlib>=3.5",
+    "numpy>=1.20",
+    "xarray>=0.18",
+    "ipywidgets",
+    "wavespectra",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+
+[tool.setuptools]
+py-modules = ["pdstripy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+markers = [
+    "slow: slower-running tests",
+    "capytaine: tests requiring capytaine solver stack",
+]

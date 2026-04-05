@@ -1,0 +1,59 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Build and packaging artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+pip-wheel-metadata/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Test and coverage output
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Type checker and linter caches
+.mypy_cache/
+.pyre/
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# macOS
+.DS_Store
+
+# IDE/editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# CAD backups
+*.stlbak
+*.3dm.rhl
+
+# PDstrip outputs
+pdstrip.out
+pressuretransfer
+relativemotions
+responsefunctions
+sectionresults
+
+# Tracked fixture copies for tests
+!tests/data/
+!tests/data/**
+!spheroid/pdstrip_run/
+!spheroid/pdstrip_run/**
+*solution*
