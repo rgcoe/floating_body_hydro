@@ -10,3 +10,7 @@ You can use the following steps to set up PDstrip.
 2. Open a command (or terminal) window and navigate to the `PDstrip` folder. Type `dir` (Windows users) or `ls` (Mac/Linux users) to list all files and subdirectories in the current directory. To “change directory,” type `cd`, then a space, then the name of the subdirectory you wish to move to. (Note: after typing the first letter or two of the subdirectory, pressing the tab key should autocomplete. If there are multiple subdirectories that start with the same letters, you may need to press the tab key multiple times to cycle through options.) The command `cd..` will move you up one level in the folder tree, i.e., closer to the root directory. The command `cd\` will take you to the root directory.
 
 3. Once in the `PDstrip` directory, navigate to the `examples` folder. From the `examples` folder, use the command `..\pdstrip.exe pdstrip.inp` (Windows) or `../pdstrip.out pdstrip.inp` (Mac/Linux) to run `PDstrip` using the input file.
+
+---
+
+Based on guide originally developed by C. Woolsey and T. Battista
