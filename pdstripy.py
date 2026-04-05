@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import logging
 from pathlib import Path
 import re
 from typing import Any
 
 import numpy as np
 import xarray as xr
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 FLOAT_RE = re.compile(r"[-+]?\d*\.?\d+(?:[Ee][-+]?\d+)?")
@@ -29,7 +33,9 @@ class PDStripMetadata:
     water_depth: float | None = None
     section_y: np.ndarray = field(default_factory=lambda: np.empty((0, 0), dtype=float))
     section_z: np.ndarray = field(default_factory=lambda: np.empty((0, 0), dtype=float))
-    section_n_points: np.ndarray = field(default_factory=lambda: np.empty((0,), dtype=int))
+    section_n_points: np.ndarray = field(
+        default_factory=lambda: np.empty((0,), dtype=int)
+    )
 
 
 def _parse_floats(text: str) -> list[float]:
@@ -39,27 +45,35 @@ def _parse_floats(text: str) -> list[float]:
 def _unique_preserve(values: list[float], atol: float = 1e-9) -> np.ndarray:
     unique_vals: list[float] = []
     for value in values:
-        if not any(np.isclose(value, seen, atol=atol, rtol=0.0) for seen in unique_vals):
+        if not any(
+            np.isclose(value, seen, atol=atol, rtol=0.0) for seen in unique_vals
+        ):
             unique_vals.append(value)
     return np.asarray(unique_vals, dtype=float)
 
 
 def _apply_common_coordinate_attrs(dataset: xr.Dataset) -> xr.Dataset:
     if "omega" in dataset.coords:
-        dataset.coords["omega"].attrs.update({
-            "long_name": "Radial frequency",
-            "units": "rad/s",
-        })
+        dataset.coords["omega"].attrs.update(
+            {
+                "long_name": "Radial frequency",
+                "units": "rad/s",
+            }
+        )
     if "wavelength" in dataset.coords:
-        dataset.coords["wavelength"].attrs.update({
-            "long_name": "Wavelength",
-            "units": "m",
-        })
+        dataset.coords["wavelength"].attrs.update(
+            {
+                "long_name": "Wavelength",
+                "units": "m",
+            }
+        )
     if "wave_direction" in dataset.coords:
-        dataset.coords["wave_direction"].attrs.update({
-            "long_name": "Wave direction",
-            "units": "rad",
-        })
+        dataset.coords["wave_direction"].attrs.update(
+            {
+                "long_name": "Wave direction",
+                "units": "rad",
+            }
+        )
     return dataset
 
 
@@ -82,7 +96,9 @@ def parse_pdstrip_out(file_path: Path) -> tuple[PDStripMetadata, ParseMessages]:
     z_still_waterline: float | None = None
     z_water_bottom: float | None = None
 
-    section_pattern = re.compile(r"Section\s+no\.\s+\d+\s+at\s+x=\s*([-+]?\d*\.?\d+(?:[Ee][-+]?\d+)?)")
+    section_pattern = re.compile(
+        r"Section\s+no\.\s+\d+\s+at\s+x=\s*([-+]?\d*\.?\d+(?:[Ee][-+]?\d+)?)"
+    )
     nsec_pattern = re.compile(r"Number of sections\s+(\d+)")
     wave_pattern = re.compile(
         r"Wave circ\. frequency\s+([-+]?\d*\.?\d+(?:[Ee][-+]?\d+)?)"
@@ -92,8 +108,12 @@ def parse_pdstrip_out(file_path: Path) -> tuple[PDStripMetadata, ParseMessages]:
         r"\s+wave angle\s+([-+]?\d*\.?\d+(?:[Ee][-+]?\d+)?)"
     )
     speed_pattern = re.compile(r"^\s*speed\s+([-+]?\d*\.?\d+(?:[Ee][-+]?\d+)?)")
-    still_waterline_pattern = re.compile(r"z of still waterline\s+([-+]?\d*\.?\d+(?:[Ee][-+]?\d+)?)")
-    water_bottom_pattern = re.compile(r"z of water bottom\s+([-+]?\d*\.?\d+(?:[Ee][-+]?\d+)?)")
+    still_waterline_pattern = re.compile(
+        r"z of still waterline\s+([-+]?\d*\.?\d+(?:[Ee][-+]?\d+)?)"
+    )
+    water_bottom_pattern = re.compile(
+        r"z of water bottom\s+([-+]?\d*\.?\d+(?:[Ee][-+]?\d+)?)"
+    )
 
     current_section_idx: int | None = None
 
@@ -202,13 +222,22 @@ def parse_pdstrip_out(file_path: Path) -> tuple[PDStripMetadata, ParseMessages]:
     return metadata, messages
 
 
-def parse_responsefunctions(file_path: Path, metadata: PDStripMetadata | None = None) -> tuple[xr.Dataset, ParseMessages]:
+def parse_responsefunctions(
+    file_path: Path, metadata: PDStripMetadata | None = None
+) -> tuple[xr.Dataset, ParseMessages]:
     messages = ParseMessages()
 
     if not file_path.exists():
         raise FileNotFoundError(f"Missing responsefunctions file: {file_path}")
 
-    lines = file_path.read_text().splitlines()
+    raw_text = file_path.read_text()
+    if not raw_text.strip():
+        warning = f"responsefunctions file is empty: {file_path}; skipping response-function variables."
+        LOGGER.warning(warning)
+        messages.warnings.append(warning)
+        return xr.Dataset(), messages
+
+    lines = raw_text.splitlines()
     if len(lines) < 3:
         raise ValueError(f"responsefunctions file appears truncated: {file_path}")
 
@@ -216,7 +245,9 @@ def parse_responsefunctions(file_path: Path, metadata: PDStripMetadata | None = 
 
     header2 = lines[1].split()
     if len(header2) < 5:
-        raise ValueError("Second header line in responsefunctions has unexpected format.")
+        raise ValueError(
+            "Second header line in responsefunctions has unexpected format."
+        )
 
     nb = int(float(header2[0]))
     intersection_flag = header2[1]
@@ -226,7 +257,9 @@ def parse_responsefunctions(file_path: Path, metadata: PDStripMetadata | None = 
 
     header3_vals = _parse_floats(lines[2])
     if len(header3_vals) < 4:
-        raise ValueError("Third header line in responsefunctions has unexpected format.")
+        raise ValueError(
+            "Third header line in responsefunctions has unexpected format."
+        )
 
     cursor = 0
     nom = int(round(header3_vals[cursor]))
@@ -277,12 +310,18 @@ def parse_responsefunctions(file_path: Path, metadata: PDStripMetadata | None = 
             k = k[: response_magnitude.shape[0]]
         else:
             k = np.pad(k, (0, response_magnitude.shape[0] - len(k)), mode="edge")
-            messages.warnings.append("Wave slope array padded due to row-count mismatch.")
+            messages.warnings.append(
+                "Wave slope array padded due to row-count mismatch."
+            )
 
     response_rotation_normalized = response_magnitude.copy()
-    response_rotation_normalized[:, 3:6] = response_rotation_normalized[:, 3:6] / k[:, None]
+    response_rotation_normalized[:, 3:6] = (
+        response_rotation_normalized[:, 3:6] / k[:, None]
+    )
 
-    dof_names = np.asarray(["Surge", "Sway", "Heave", "Roll", "Pitch", "Yaw"], dtype=object)
+    dof_names = np.asarray(
+        ["Surge", "Sway", "Heave", "Roll", "Pitch", "Yaw"], dtype=object
+    )
     rows = response_magnitude.shape[0]
     nominal_rows = nom * nv * nmu
 
@@ -293,7 +332,10 @@ def parse_responsefunctions(file_path: Path, metadata: PDStripMetadata | None = 
 
         dataset = xr.Dataset(
             data_vars={
-                "rao_magnitude": (("wavelength", "forward_speed", "wave_direction", "influenced_dof"), response_magnitude_4d),
+                "rao_magnitude": (
+                    ("wavelength", "forward_speed", "wave_direction", "influenced_dof"),
+                    response_magnitude_4d,
+                ),
                 "rao_rotation_normalized": (
                     ("wavelength", "forward_speed", "wave_direction", "influenced_dof"),
                     response_rotation_normalized_4d,
@@ -325,7 +367,10 @@ def parse_responsefunctions(file_path: Path, metadata: PDStripMetadata | None = 
         dataset = xr.Dataset(
             data_vars={
                 "rao_magnitude": (("case", "influenced_dof"), response_magnitude),
-                "rao_rotation_normalized": (("case", "influenced_dof"), response_rotation_normalized),
+                "rao_rotation_normalized": (
+                    ("case", "influenced_dof"),
+                    response_rotation_normalized,
+                ),
             },
             coords={
                 "case": np.arange(rows),
@@ -381,7 +426,9 @@ def parse_sectionresults(
     title = lines[0].strip()
     second_line_vals = _parse_floats(lines[1])
     if not second_line_vals:
-        raise ValueError("Could not parse frequency block count from sectionresults header.")
+        raise ValueError(
+            "Could not parse frequency block count from sectionresults header."
+        )
     n_freq_declared = int(round(second_line_vals[0]))
 
     blocks: list[dict[str, Any]] = []
@@ -436,10 +483,22 @@ def parse_sectionresults(
     dof6 = np.asarray(["Surge", "Sway", "Heave", "Roll", "Pitch", "Yaw"], dtype=object)
 
     added_mass = np.full((n_sections, n_freq_declared, 6, 6), np.nan, dtype=float)
-    radiation_damping = np.full((n_sections, n_freq_declared, 6, 6), np.nan, dtype=float)
-    am_complex = np.full((n_sections, n_freq_declared, 6, 6), np.nan + 1j * np.nan, dtype=np.complex128)
-    diffraction_force = np.full((n_sections, n_freq_declared, nmu_max, 6), np.nan + 1j * np.nan, dtype=np.complex128)
-    froude_krylov_force = np.full((n_sections, n_freq_declared, nmu_max, 6), np.nan + 1j * np.nan, dtype=np.complex128)
+    radiation_damping = np.full(
+        (n_sections, n_freq_declared, 6, 6), np.nan, dtype=float
+    )
+    am_complex = np.full(
+        (n_sections, n_freq_declared, 6, 6), np.nan + 1j * np.nan, dtype=np.complex128
+    )
+    diffraction_force = np.full(
+        (n_sections, n_freq_declared, nmu_max, 6),
+        np.nan + 1j * np.nan,
+        dtype=np.complex128,
+    )
+    froude_krylov_force = np.full(
+        (n_sections, n_freq_declared, nmu_max, 6),
+        np.nan + 1j * np.nan,
+        dtype=np.complex128,
+    )
     omega_grid = np.full((n_sections, n_freq_declared), np.nan, dtype=float)
 
     for idx, block in enumerate(blocks):
@@ -512,21 +571,51 @@ def parse_sectionresults(
         "wave_direction": wave_direction_coord,
     }
 
-    if metadata is not None and metadata.section_y.ndim == 2 and metadata.section_z.ndim == 2:
+    if (
+        metadata is not None
+        and metadata.section_y.ndim == 2
+        and metadata.section_z.ndim == 2
+    ):
         n_point = min(metadata.section_y.shape[1], metadata.section_z.shape[1])
         if n_point > 0:
-            data_vars["y"] = (("section", "point"), metadata.section_y[:n_sections, :n_point])
-            data_vars["z"] = (("section", "point"), metadata.section_z[:n_sections, :n_point])
-            data_vars["section_n_points"] = (("section",), metadata.section_n_points[:n_sections])
+            data_vars["y"] = (
+                ("section", "point"),
+                metadata.section_y[:n_sections, :n_point],
+            )
+            data_vars["z"] = (
+                ("section", "point"),
+                metadata.section_z[:n_sections, :n_point],
+            )
+            data_vars["section_n_points"] = (
+                ("section",),
+                metadata.section_n_points[:n_sections],
+            )
             coords["point"] = np.arange(n_point, dtype=int)
 
-    data_vars.update({
-        "added_mass": (("section", "omega", "influenced_dof", "radiating_dof"), added_mass),
-        "radiation_damping": (("section", "omega", "influenced_dof", "radiating_dof"), radiation_damping),
-        "am_complex": (("section", "omega", "influenced_dof", "radiating_dof"), am_complex),
-        "diffraction_force": (("section", "omega", "wave_direction", "influenced_dof"), diffraction_force),
-        "Froude_Krylov_force": (("section", "omega", "wave_direction", "influenced_dof"), froude_krylov_force),
-    })
+    data_vars.update(
+        {
+            "added_mass": (
+                ("section", "omega", "influenced_dof", "radiating_dof"),
+                added_mass,
+            ),
+            "radiation_damping": (
+                ("section", "omega", "influenced_dof", "radiating_dof"),
+                radiation_damping,
+            ),
+            "am_complex": (
+                ("section", "omega", "influenced_dof", "radiating_dof"),
+                am_complex,
+            ),
+            "diffraction_force": (
+                ("section", "omega", "wave_direction", "influenced_dof"),
+                diffraction_force,
+            ),
+            "Froude_Krylov_force": (
+                ("section", "omega", "wave_direction", "influenced_dof"),
+                froude_krylov_force,
+            ),
+        }
+    )
 
     dataset = xr.Dataset(
         data_vars=data_vars,
@@ -564,8 +653,12 @@ def parse_pdstrip_folder(folder: str | Path = ".") -> dict[str, Any]:
         merged.attrs["water_depth"] = float(metadata.water_depth)
     merged = _apply_common_coordinate_attrs(merged)
 
-    all_warnings = meta_messages.warnings + response_messages.warnings + section_messages.warnings
-    all_errors = meta_messages.errors + response_messages.errors + section_messages.errors
+    all_warnings = (
+        meta_messages.warnings + response_messages.warnings + section_messages.warnings
+    )
+    all_errors = (
+        meta_messages.errors + response_messages.errors + section_messages.errors
+    )
 
     return {
         "dataset": merged,

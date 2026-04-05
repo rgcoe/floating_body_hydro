@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import logging
 
 import pytest
 
@@ -34,3 +35,20 @@ def test_parse_sectionresults_truncated_file_raises(tmp_path: Path) -> None:
     path.write_text("title\n1\n", encoding="utf-8")
     with pytest.raises(ValueError):
         pdstripy.parse_sectionresults(path)
+
+
+def test_parse_responsefunctions_empty_file_warns_and_returns_empty_dataset(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    path = tmp_path / "responsefunctions"
+    path.write_text("", encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING):
+        dataset, messages = pdstripy.parse_responsefunctions(path)
+
+    assert len(dataset.data_vars) == 0
+    assert len(dataset.coords) == 0
+    assert len(messages.errors) == 0
+    assert len(messages.warnings) == 1
+    assert "responsefunctions file is empty" in messages.warnings[0]
+    assert "responsefunctions file is empty" in caplog.text
