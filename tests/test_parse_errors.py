@@ -52,3 +52,13 @@ def test_parse_responsefunctions_empty_file_warns_and_returns_empty_dataset(
     assert len(messages.warnings) == 1
     assert "responsefunctions file is empty" in messages.warnings[0]
     assert "responsefunctions file is empty" in caplog.text
+
+
+def test_parse_pdstrip_folder_debug_logs_absolute_paths(
+    pdstrip_fixture_dir: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.DEBUG):
+        pdstripy.parse_pdstrip_folder(pdstrip_fixture_dir)
+
+    assert "Absolute path for PDStrip folder is" in caplog.text
+    assert str(pdstrip_fixture_dir.resolve()) in caplog.text

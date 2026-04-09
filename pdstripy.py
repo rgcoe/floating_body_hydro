@@ -12,6 +12,11 @@ import xarray as xr
 
 LOGGER = logging.getLogger(__name__)
 
+PDSTRIP_OUT_DEBUG_LINE_INTERVAL = 100
+RESPONSEFUNCTIONS_DEBUG_ROW_INTERVAL = 1000
+SECTIONRESULTS_DEBUG_BLOCK_INTERVAL = 50
+SECTIONRESULTS_DEBUG_PROCESS_INTERVAL = 100
+
 
 FLOAT_RE = re.compile(r"[-+]?\d*\.?\d+(?:[Ee][-+]?\d+)?")
 COMPLEX_PAIR_RE = re.compile(
@@ -77,11 +82,21 @@ def _apply_common_coordinate_attrs(dataset: xr.Dataset) -> xr.Dataset:
     return dataset
 
 
+def _log_debug_absolute_path(description: str, path: Path) -> None:
+    if LOGGER.isEnabledFor(logging.DEBUG):
+        LOGGER.debug(
+            "Absolute path for %s is %s", description, path.resolve(strict=False)
+        )
+
+
 def parse_pdstrip_out(file_path: Path) -> tuple[PDStripMetadata, ParseMessages]:
     messages = ParseMessages()
 
     if not file_path.exists():
         raise FileNotFoundError(f"Missing pdstrip.out file: {file_path}")
+
+    LOGGER.info("Parsing pdstrip.out from %s.", file_path)
+    _log_debug_absolute_path("pdstrip.out", file_path)
 
     n_sections = None
     section_x: list[float] = []
@@ -117,8 +132,16 @@ def parse_pdstrip_out(file_path: Path) -> tuple[PDStripMetadata, ParseMessages]:
 
     current_section_idx: int | None = None
 
-    for raw_line in file_path.read_text().splitlines():
+    for line_number, raw_line in enumerate(file_path.read_text().splitlines(), start=1):
         line = raw_line.rstrip("\n")
+
+        if line_number % PDSTRIP_OUT_DEBUG_LINE_INTERVAL == 0:
+            LOGGER.debug(
+                "Parsed %d lines from pdstrip.out so far; found %d sections and %d wave cases.",
+                line_number,
+                len(section_x),
+                len(omega),
+            )
 
         nsec_match = nsec_pattern.search(line)
         if nsec_match:
@@ -159,16 +182,20 @@ def parse_pdstrip_out(file_path: Path) -> tuple[PDStripMetadata, ParseMessages]:
             forward_speeds.append(float(speed_match.group(1)))
 
     if n_sections is None:
-        messages.errors.append("Could not find 'Number of sections' in pdstrip.out.")
+        message = "Could not find 'Number of sections' in pdstrip.out."
+        LOGGER.error(message)
+        messages.errors.append(message)
         n_sections = len(section_x)
 
     if len(section_x) != n_sections:
-        messages.warnings.append(
-            f"Found {len(section_x)} section x-values but metadata says {n_sections} sections."
-        )
+        message = f"Found {len(section_x)} section x-values but metadata says {n_sections} sections."
+        LOGGER.warning(message)
+        messages.warnings.append(message)
 
     if not omega:
-        messages.errors.append("No wave cases were parsed from pdstrip.out.")
+        message = "No wave cases were parsed from pdstrip.out."
+        LOGGER.warning(message)
+        messages.warnings.append(message)
 
     n_sections_parsed = len(section_x)
     section_n_points = np.zeros(n_sections_parsed, dtype=int)
@@ -176,9 +203,9 @@ def parse_pdstrip_out(file_path: Path) -> tuple[PDStripMetadata, ParseMessages]:
         ny = len(section_y_lists[idx])
         nz = len(section_z_lists[idx])
         if ny != nz:
-            messages.warnings.append(
-                f"Section {idx+1} y/z point count mismatch (y={ny}, z={nz}); truncating to shortest length."
-            )
+            message = f"Section {idx+1} y/z point count mismatch (y={ny}, z={nz}); truncating to shortest length."
+            LOGGER.warning(message)
+            messages.warnings.append(message)
         section_n_points[idx] = min(ny, nz)
 
     max_points = int(section_n_points.max()) if section_n_points.size else 0
@@ -219,6 +246,13 @@ def parse_pdstrip_out(file_path: Path) -> tuple[PDStripMetadata, ParseMessages]:
         section_z=section_z,
         section_n_points=section_n_points,
     )
+    LOGGER.info(
+        "Finished parsing pdstrip.out from %s with %d declared sections, %d parsed sections, and %d wave cases.",
+        file_path,
+        metadata.n_sections,
+        len(metadata.section_x),
+        len(metadata.cases["omega"]),
+    )
     return metadata, messages
 
 
@@ -229,6 +263,9 @@ def parse_responsefunctions(
 
     if not file_path.exists():
         raise FileNotFoundError(f"Missing responsefunctions file: {file_path}")
+
+    LOGGER.info("Parsing responsefunctions from %s.", file_path)
+    _log_debug_absolute_path("responsefunctions", file_path)
 
     raw_text = file_path.read_text()
     if not raw_text.strip():
@@ -281,6 +318,14 @@ def parse_responsefunctions(
     cursor += 1
     _section_x = np.asarray(header3_vals[cursor : cursor + nse], dtype=float)
 
+    LOGGER.debug(
+        "Parsed responsefunctions headers with %d wavelengths, %d forward speeds, %d wave directions, and %d sections.",
+        nom,
+        nv,
+        nmu,
+        nse,
+    )
+
     n_lines_expected = nom * nv * nmu
     response_rows: list[list[float]] = []
 
@@ -288,13 +333,19 @@ def parse_responsefunctions(
         vals = _parse_floats(line)
         if len(vals) >= 6:
             response_rows.append(vals[:6])
+            if len(response_rows) % RESPONSEFUNCTIONS_DEBUG_ROW_INTERVAL == 0:
+                LOGGER.debug(
+                    "Parsed %d responsefunctions rows so far out of %d expected rows.",
+                    len(response_rows),
+                    n_lines_expected,
+                )
         if len(response_rows) >= n_lines_expected:
             break
 
     if len(response_rows) < n_lines_expected:
-        messages.warnings.append(
-            f"responsefunctions rows parsed={len(response_rows)} but expected={n_lines_expected}."
-        )
+        message = f"responsefunctions rows parsed={len(response_rows)} but expected={n_lines_expected}."
+        LOGGER.warning(message)
+        messages.warnings.append(message)
 
     if not response_rows:
         raise ValueError("No response rows parsed from responsefunctions.")
@@ -310,9 +361,9 @@ def parse_responsefunctions(
             k = k[: response_magnitude.shape[0]]
         else:
             k = np.pad(k, (0, response_magnitude.shape[0] - len(k)), mode="edge")
-            messages.warnings.append(
-                "Wave slope array padded due to row-count mismatch."
-            )
+            message = "Wave slope array padded due to row-count mismatch."
+            LOGGER.warning(message)
+            messages.warnings.append(message)
 
     response_rotation_normalized = response_magnitude.copy()
     response_rotation_normalized[:, 3:6] = (
@@ -361,9 +412,12 @@ def parse_responsefunctions(
             },
         )
     else:
-        messages.warnings.append(
-            "responsefunctions could not be reshaped to [wavelength, forward_speed, wave_direction, influenced_dof]; exposing case dimension."
+        message = (
+            "responsefunctions could not be reshaped to [wavelength, forward_speed, "
+            "wave_direction, influenced_dof]; exposing case dimension."
         )
+        LOGGER.warning(message)
+        messages.warnings.append(message)
         dataset = xr.Dataset(
             data_vars={
                 "rao_magnitude": (("case", "influenced_dof"), response_magnitude),
@@ -392,11 +446,17 @@ def parse_responsefunctions(
 
     if metadata is not None:
         if metadata.n_sections != nse:
-            messages.warnings.append(
-                f"Section count mismatch: pdstrip.out={metadata.n_sections}, responsefunctions={nse}."
-            )
+            message = f"Section count mismatch: pdstrip.out={metadata.n_sections}, responsefunctions={nse}."
+            LOGGER.warning(message)
+            messages.warnings.append(message)
 
     dataset = _apply_common_coordinate_attrs(dataset)
+    LOGGER.info(
+        "Finished parsing responsefunctions from %s with %d rows and dataset sizes %s.",
+        file_path,
+        rows,
+        dict(dataset.sizes),
+    )
     return dataset, messages
 
 
@@ -419,6 +479,9 @@ def parse_sectionresults(
     if not file_path.exists():
         raise FileNotFoundError(f"Missing sectionresults file: {file_path}")
 
+    LOGGER.info("Parsing sectionresults from %s.", file_path)
+    _log_debug_absolute_path("sectionresults", file_path)
+
     lines = file_path.read_text().splitlines()
     if len(lines) < 3:
         raise ValueError(f"sectionresults file appears truncated: {file_path}")
@@ -430,6 +493,10 @@ def parse_sectionresults(
             "Could not parse frequency block count from sectionresults header."
         )
     n_freq_declared = int(round(second_line_vals[0]))
+    LOGGER.debug(
+        "Parsed sectionresults header: %d declared frequency blocks per section.",
+        n_freq_declared,
+    )
 
     blocks: list[dict[str, Any]] = []
     current_block: dict[str, Any] | None = None
@@ -442,6 +509,11 @@ def parse_sectionresults(
         if _is_section_header(line):
             if current_block is not None:
                 blocks.append(current_block)
+                if len(blocks) % SECTIONRESULTS_DEBUG_BLOCK_INTERVAL == 0:
+                    LOGGER.debug(
+                        "Collected %d sectionresults blocks so far.",
+                        len(blocks),
+                    )
 
             vals = _parse_floats(line)
             current_block = {
@@ -460,6 +532,11 @@ def parse_sectionresults(
 
     if current_block is not None:
         blocks.append(current_block)
+        if len(blocks) % SECTIONRESULTS_DEBUG_BLOCK_INTERVAL == 0:
+            LOGGER.debug(
+                "Collected %d sectionresults blocks so far.",
+                len(blocks),
+            )
 
     if not blocks:
         raise ValueError("No sectionresults data blocks parsed.")
@@ -467,17 +544,23 @@ def parse_sectionresults(
     n_sections = metadata.n_sections if metadata is not None else None
     if n_sections is None:
         if len(blocks) % n_freq_declared != 0:
-            messages.warnings.append(
-                "Could not infer number of sections exactly from blocks/frequency count; assuming 1 section."
+            message = (
+                "Could not infer number of sections exactly from blocks/frequency "
+                "count; assuming 1 section."
             )
+            LOGGER.warning(message)
+            messages.warnings.append(message)
             n_sections = 1
         else:
             n_sections = len(blocks) // n_freq_declared
 
     if n_sections * n_freq_declared != len(blocks):
-        messages.warnings.append(
-            f"Block count mismatch: parsed blocks={len(blocks)}, expected={n_sections*n_freq_declared} from section/frequency counts."
+        message = (
+            f"Block count mismatch: parsed blocks={len(blocks)}, expected={n_sections*n_freq_declared} "
+            "from section/frequency counts."
         )
+        LOGGER.warning(message)
+        messages.warnings.append(message)
 
     nmu_max = max(block["nmu"] for block in blocks)
     dof6 = np.asarray(["Surge", "Sway", "Heave", "Roll", "Pitch", "Yaw"], dtype=object)
@@ -507,6 +590,13 @@ def parse_sectionresults(
         if sec_idx >= n_sections or freq_idx >= n_freq_declared:
             continue
 
+        if idx > 0 and idx % SECTIONRESULTS_DEBUG_PROCESS_INTERVAL == 0:
+            LOGGER.debug(
+                "Processed %d of %d sectionresults blocks into arrays.",
+                idx,
+                len(blocks),
+            )
+
         omega = block["omega"]
         nmu = block["nmu"]
         data = block["complex"]
@@ -514,9 +604,9 @@ def parse_sectionresults(
 
         expected = 9 + 6 * nmu
         if len(data) < expected:
-            messages.warnings.append(
-                f"Block {idx} has {len(data)} complex entries but expected at least {expected}."
-            )
+            message = f"Block {idx} has {len(data)} complex entries but expected at least {expected}."
+            LOGGER.warning(message)
+            messages.warnings.append(message)
             continue
 
         am_vals = np.asarray(data[:9], dtype=np.complex128).reshape(3, 3)
@@ -632,20 +722,34 @@ def parse_sectionresults(
         dataset["radiation_damping"].attrs["long_name"] = "Radiation damping"
 
     dataset = _apply_common_coordinate_attrs(dataset)
+    LOGGER.info(
+        "Finished parsing sectionresults from %s with %d blocks across %d sections and dataset sizes %s.",
+        file_path,
+        len(blocks),
+        n_sections,
+        dict(dataset.sizes),
+    )
     return dataset, messages
 
 
 def parse_pdstrip_folder(folder: str | Path = ".") -> dict[str, Any]:
     folder_path = Path(folder)
 
+    LOGGER.info("Parsing PDStrip folder from %s.", folder_path)
+    _log_debug_absolute_path("PDStrip folder", folder_path)
+
+    LOGGER.info("Parsing pdstrip.out metadata.")
     metadata, meta_messages = parse_pdstrip_out(folder_path / "pdstrip.out")
+    LOGGER.info("Parsing responsefunctions dataset.")
     response_ds, response_messages = parse_responsefunctions(
         folder_path / "responsefunctions", metadata=metadata
     )
+    LOGGER.info("Parsing sectionresults dataset.")
     section_ds, section_messages = parse_sectionresults(
         folder_path / "sectionresults", metadata=metadata
     )
 
+    LOGGER.debug("Merging parsed responsefunctions and sectionresults datasets.")
     merged = xr.merge([response_ds, section_ds], compat="no_conflicts", join="outer")
     merged.attrs["source_folder"] = str(folder_path)
     merged.attrs["n_sections_pdstrip_out"] = int(metadata.n_sections)
@@ -658,6 +762,12 @@ def parse_pdstrip_folder(folder: str | Path = ".") -> dict[str, Any]:
     )
     all_errors = (
         meta_messages.errors + response_messages.errors + section_messages.errors
+    )
+
+    LOGGER.info(
+        "Finished parsing PDStrip folder %s with merged dataset sizes %s.",
+        folder_path,
+        dict(merged.sizes),
     )
 
     return {
