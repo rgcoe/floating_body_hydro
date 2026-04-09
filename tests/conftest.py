@@ -18,8 +18,28 @@ def pdstrip_fixture_dir() -> Path:
 
 
 @pytest.fixture(scope="session")
+def parse_error_fixture_dir() -> Path:
+    path = Path(__file__).resolve().parent / "data" / "parse_errors"
+    required = [
+        "responsefunctions_truncated",
+        "responsefunctions_empty",
+        "responsefunctions_short_rows",
+        "responsefunctions_section_mismatch",
+        "sectionresults_truncated",
+        "sectionresults_three_blocks_declared_two_freq",
+        "sectionresults_incomplete_block",
+    ]
+    missing = [name for name in required if not (path / name).exists()]
+    if missing:
+        pytest.skip(f"Missing fixture files in {path}: {missing}")
+    return path
+
+
+@pytest.fixture(scope="session")
 def parsed_components(pdstrip_fixture_dir: Path):
-    metadata, meta_messages = pdstripy.parse_pdstrip_out(pdstrip_fixture_dir / "pdstrip.out")
+    metadata, meta_messages = pdstripy.parse_pdstrip_out(
+        pdstrip_fixture_dir / "pdstrip.out"
+    )
     response_ds, response_messages = pdstripy.parse_responsefunctions(
         pdstrip_fixture_dir / "responsefunctions", metadata=metadata
     )
